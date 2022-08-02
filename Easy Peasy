@@ -1,0 +1,129 @@
+Using nmap to enumerate.
+
+nmap -p- -sC -sV $IP --open
+
+PORT      STATE SERVICE VERSION
+80/tcp    open  http    nginx 1.16.1
+6498/tcp  open  ssh     OpenSSH 7.6p1 Ubuntu 4ubuntu0.3 (Ubuntu Linux; protocol 2.0)
+65524/tcp open  http    Apache httpd 2.4.43 ((Ubuntu))
+
+we can see the machine is running 2 web servers
+
+Before manually enumerating the first we run gobuster for any hidden directories:
+
+gobuster dir -u http://10.10.146.254/ -w /usr/share/seclists/Discovery/Web-Content/common.txt 
+
+Gobuster v3.1.0
+by OJ Reeves (@TheColonial) & Christian Mehlmauer (@firefart)
+===============================================================
+[+] Url:                     http://10.10.146.254
+[+] Method:                  GET
+[+] Threads:                 10
+[+] Wordlist:                /usr/share/seclists/Discovery/Web-Content/common.txt
+[+] Negative Status codes:   404
+[+] User Agent:              gobuster/3.1.0
+[+] Timeout:                 10s
+===============================================================
+2022/08/02 16:44:27 Starting gobuster in directory enumeration mode
+===============================================================
+/hidden               (Status: 301) [Size: 169] [--> http://10.10.146.254/hidden/]
+/index.html           (Status: 200) [Size: 612]                                   
+/robots.txt           (Status: 200) [Size: 43]                                    
+Progress: 4343 / 4713 (92.15%)    
+
+
+We visit the hidden directory, there was just a picture in the background.
+we download the photo for any steganography
+after using stegseek nothing was found
+
+we further enumerate again to see if there are other directories past hidden:
+
+gobuster dir -u http://10.10.146.254/hidden -w /usr/share/seclists/Discovery/Web-Content/common.txt 
+
+Gobuster v3.1.0
+by OJ Reeves (@TheColonial) & Christian Mehlmauer (@firefart)
+===============================================================
+[+] Url:                     http://10.10.146.254/hidden
+[+] Method:                  GET
+[+] Threads:                 10
+[+] Wordlist:                /usr/share/seclists/Discovery/Web-Content/common.txt
+[+] Negative Status codes:   404
+[+] User Agent:              gobuster/3.1.0
+[+] Timeout:                 10s
+===============================================================
+2022/08/02 16:50:35 Starting gobuster in directory enumeration mode
+===============================================================
+/index.html           (Status: 200) [Size: 390]
+/whatever             (Status: 301) [Size: 169] [--> http://10.10.146.254/hidden/whatever/]
+
+we visit the site http://$IP/hidden/whatever there is another picture
+
+first thing mind i download the picture and use stegseek again but nothing there too.
+
+Opening the source code there is a hidden field with an encoded bas64 which is our first flag.
+
+Enumerating again:
+
+gobuster dir -u http://10.10.146.254/hidden/whatever -w /usr/share/seclists/Discovery/Web-Content/common.txt 
+
+but nothing new was found.
+
+Now we are going to enumerate the other webserver on port 65524
+
+going through the same steps we run gobuster in the background
+
+gobuster dir -u http://10.10.146.254:65524 -w /usr/share/seclists/Discovery/Web-Content/common.txt 
+
+Viewing the source code of the page we also find a hidden field with an encoded base62, which is another hidden directory
+
+/n0th1ng3ls3m4tt3r
+
+Gobuster results:
+
+Gobuster v3.1.0                                                                                                                                                                                    
+by OJ Reeves (@TheColonial) & Christian Mehlmauer (@firefart)                                                                                                                                      
+===============================================================                                                                                                                                    
+[+] Url:                     http://10.10.146.254:65524                                                                                                                                            
+[+] Method:                  GET
+[+] Threads:                 10
+[+] Wordlist:                /usr/share/seclists/Discovery/Web-Content/common.txt
+[+] Negative Status codes:   404
+[+] User Agent:              gobuster/3.1.0
+[+] Timeout:                 10s
+===============================================================
+2022/08/02 17:02:16 Starting gobuster in directory enumeration mode
+===============================================================
+/.htaccess            (Status: 403) [Size: 281]
+/.hta                 (Status: 403) [Size: 281]
+/.htpasswd            (Status: 403) [Size: 281]
+/index.html           (Status: 200) [Size: 10818]
+/robots.txt           (Status: 200) [Size: 153]  
+/server-status        (Status: 403) [Size: 281]  
+
+in the /robots.txt there is a user agent with an md5 hash, after we decode it we have the second flag.
+
+http://10.10.146.254:65524/n0th1ng3ls3m4tt3r/ 
+there is another hash 
+
+john --wordlist=easypeasy.txt -format=gost hash 
+we get the password
+
+there is a picture in the site, which we download and using steghide with the password we found there is a .txt file extracted which contains a username and an encoded binary.
+
+we decode it and we get credentials.
+
+now we ssh on port 6498
+
+we check for cronjobs
+
+cat /etc/crontab
+
+we find 
+* *    * * *   root    cd /var/www/ && sudo bash .mysecretcronjob.sh
+
+the file is owned by our user so we can modify it.
+
+we edit the script and add our reverse shell
+
+we open a listener in our machine and after a while we get a shell as root.
+
