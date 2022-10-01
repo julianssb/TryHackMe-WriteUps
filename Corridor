@@ -33,7 +33,7 @@ by OJ Reeves (@TheColonial) & Christian Mehlmauer (@firefart)
 [+] Url:                     http://10.10.123.63
 [+] Method:                  GET
 [+] Threads:                 10
-[+] Wordlist:                /home/julian/tHM/corridor/hashes.txt
+[+] Wordlist:                /home/user/tHM/corridor/hashes.txt
 [+] Negative Status codes:   404
 [+] User Agent:              gobuster/3.1.0
 [+] Timeout:                 10s
