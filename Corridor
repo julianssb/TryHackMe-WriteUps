@@ -44,3 +44,19 @@ by OJ Reeves (@TheColonial) & Christian Mehlmauer (@firefart)
 
 We got a hit with different size, trying that hash we get our flag.
 
+-------------------------------------------
+hashes.py
+
+import hashlib
+
+f = open("hashes.txt","w")
+
+for i in range(0, 100):
+	number = str(i)
+	hash_object = hashlib.md5(number.encode())
+	md5_hash = hash_object.hexdigest()
+	with open("hashes.txt","a"):
+		f.write(md5_hash)
+		f.write('\n')
+
+f.close()
